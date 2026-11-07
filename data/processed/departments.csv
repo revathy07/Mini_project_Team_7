@@ -1,0 +1,4 @@
+department_id,department_name,location,annual_budget,cost_center
+1,Sales,New York,4500000,CC-100
+2,Research & Development,San Francisco,9000000,CC-110
+3,Human Resources,Chicago,1800000,CC-120
