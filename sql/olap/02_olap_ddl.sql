@@ -26,7 +26,7 @@ CREATE TABLE Dim_Employee (
   start_date      DATE NOT NULL,
   end_date        DATE NOT NULL DEFAULT '9999-12-31',
   is_current      BOOLEAN NOT NULL DEFAULT TRUE,
-  UNIQUE KEY uk_emp_scd (employee_code, is_current)
+  INDEX idx_employee_current (employee_code, is_current)
 );
 
 CREATE TABLE Dim_Project (
