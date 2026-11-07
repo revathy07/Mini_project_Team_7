@@ -36,6 +36,58 @@ checks = {
     "scores within 1-5": rev.performance_score.between(1, 5).all(),
 }
 
+# ---------- SCD2 history checks ----------
+chg = (pd.read_csv(d / "employee_changes.csv",
+                   parse_dates=["effective_start_date", "effective_end_date"])
+         .sort_values(["employee_id", "version_no"]).reset_index(drop=True))
+g = chg.groupby("employee_id")
+
+tracked = ["department_id", "job_role", "job_level", "monthly_income"]
+
+chg["next_start"] = g["effective_start_date"].shift(-1)
+
+prev = g[["job_level", "monthly_income"]].shift()
+
+changed = (chg[tracked] != g[tracked].shift()).any(axis=1)
+
+first = chg[chg.version_no == 1].merge(emp[["employee_id", "hire_date"]], on="employee_id")
+
+cur = chg[chg.is_current == 1].merge(
+    emp[["employee_id", "department_id", "job_role", "job_level", "monthly_income"]],
+    on="employee_id", suffixes=("", "_emp"))
+
+closed = chg[chg.is_current == 0]
+
+promo = chg.change_type.eq("Promotion")
+
+emp_end = emp.set_index("employee_id").termination_date.fillna(cfg.snapshot_date)
+
+valid_pairs = pd.MultiIndex.from_frame(emp[["department_id", "job_role"]].drop_duplicates())
+
+checks.update({
+    "changes employee FK": chg.employee_id.isin(emp.employee_id).all(),
+    "first version starts at hire date": (first.effective_start_date == first.hire_date).all(),
+    "windows contiguous (end == next start)": (closed.effective_end_date == closed.next_start).all(),
+    "closed windows >= 90 days": ((closed.effective_end_date - closed.effective_start_date).dt.days >= 90).all(),
+    "exactly one current version per employee": g.is_current.sum().eq(1).all(),
+    "current version is the last one": g.tail(1).is_current.eq(1).all(),
+    "current version has NULL end date": chg[chg.is_current == 1].effective_end_date.isna().all(),
+    "current version == employees.csv": ((cur.department_id == cur.department_id_emp)
+        & (cur.job_role == cur.job_role_emp) & (cur.job_level == cur.job_level_emp)
+        & (cur.monthly_income == cur.monthly_income_emp)).all(),
+    "every new version differs from previous": changed[chg.version_no > 1].all(),
+    "promotions raise level and salary": ((chg.job_level > prev.job_level)
+        & (chg.monthly_income > prev.monthly_income))[promo].all(),
+    "dept/role pairs valid": valid_pairs.isin(
+        pd.MultiIndex.from_frame(chg[["department_id", "job_role"]])).all() or
+        pd.MultiIndex.from_frame(chg[["department_id", "job_role"]]).isin(valid_pairs).all(),
+    "changes within employment": (chg.effective_start_date <= chg.employee_id.map(emp_end)).all(),
+})
+
+print(f"\nEmployees with history: {chg.employee_id.nunique():,} "
+      f"({chg.employee_id.nunique() / len(emp):.1%})")
+print(chg.change_type.value_counts().to_string())
+
 for name, ok in checks.items():
     print(f"{'PASS' if ok else 'FAIL'}  {name}")
 

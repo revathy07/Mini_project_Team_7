@@ -11,6 +11,7 @@ from src.synthesizer.employees import EmployeeGenerator
 from src.synthesizer.projects import ProjectGenerator
 from src.synthesizer.reviews import ReviewGenerator
 
+from src.synthesizer.changes import ChangeGenerator
 
 class SynthesisPipeline:
     def __init__(self, config: SynthConfig):
@@ -27,6 +28,7 @@ class SynthesisPipeline:
         projects = ProjectGenerator(cfg, rng, departments).generate()
         assignments = AssignmentGenerator(cfg, rng, employees, projects).generate()
         reviews = ReviewGenerator(cfg, rng, employees).generate()
+        changes = ChangeGenerator(cfg, rng, employees, departments).generate()
 
         tables = {
             "departments": departments,
@@ -34,6 +36,8 @@ class SynthesisPipeline:
             "projects": projects,
             "project_assignments": assignments,
             "performance_reviews": reviews,
+            "performance_reviews": reviews,
+            "employee_changes": changes,
         }
         self._save(tables)
         return tables
