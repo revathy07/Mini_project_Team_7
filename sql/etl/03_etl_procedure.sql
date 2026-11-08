@@ -1,6 +1,5 @@
 -- 03_etl_procedure.sql (ETL & SCD Type 2)
-
-USE employee_oltp;
+USE employee_dw;
 
 DELIMITER $$
 
@@ -8,15 +7,18 @@ DELIMITER $$
 DROP PROCEDURE IF EXISTS sp_load_dim_department$$
 CREATE PROCEDURE sp_load_dim_department()
 BEGIN
+    SET FOREIGN_KEY_CHECKS = 0;
     TRUNCATE TABLE employee_dw.Dim_Department;
     INSERT INTO employee_dw.Dim_Department (department_code, department_name, location, budget)
     SELECT department_code, department_name, location, budget FROM employee_oltp.Departments;
+    SET FOREIGN_KEY_CHECKS = 1;
 END$$
 
 -- 2. Load Dim_Date
 DROP PROCEDURE IF EXISTS sp_load_dim_date$$
 CREATE PROCEDURE sp_load_dim_date()
 BEGIN
+    SET FOREIGN_KEY_CHECKS = 0;
     TRUNCATE TABLE employee_dw.Dim_Date;
     SET @@cte_max_recursion_depth = 10000; 
     
@@ -34,25 +36,28 @@ BEGIN
         QUARTER(dt) AS quarter,
         YEAR(dt) AS year
     FROM date_series;
+    SET FOREIGN_KEY_CHECKS = 1;
 END$$
 
 -- 3. Load Dim_Project
 DROP PROCEDURE IF EXISTS sp_load_dim_project$$
 CREATE PROCEDURE sp_load_dim_project()
 BEGIN
+    SET FOREIGN_KEY_CHECKS = 0;
     TRUNCATE TABLE employee_dw.Dim_Project;
     INSERT INTO employee_dw.Dim_Project (project_code, project_name, department_name, status)
     SELECT 
         p.project_code, p.project_name, d.department_name, p.status
     FROM employee_oltp.Projects p
     LEFT JOIN employee_oltp.Departments d ON p.department_id = d.department_id;
+    SET FOREIGN_KEY_CHECKS = 1;
 END$$
 
 -- 4. Load Dim_Employee (SCD Type 2)
 DROP PROCEDURE IF EXISTS sp_load_dim_employee_scd2$$
 CREATE PROCEDURE sp_load_dim_employee_scd2()
 BEGIN
-    -- Step A: Close current records for changed employees
+
     UPDATE employee_dw.Dim_Employee d
     JOIN employee_oltp.Employees e ON d.employee_code = e.employee_code
     JOIN employee_oltp.Departments dept ON e.department_id = dept.department_id
@@ -62,7 +67,7 @@ BEGIN
       AND (d.department_name <> dept.department_name OR d.job_role <> e.job_role 
            OR d.job_level <> e.job_level OR d.monthly_income <> e.monthly_income);
 
-    -- Step B: Insert new versions or brand new employees
+
     INSERT INTO employee_dw.Dim_Employee (
         employee_code, full_name, email, department_name, 
         job_role, job_level, monthly_income, hire_date, 
@@ -82,7 +87,9 @@ END$$
 DROP PROCEDURE IF EXISTS sp_load_fact_performance$$
 CREATE PROCEDURE sp_load_fact_performance()
 BEGIN
+    SET FOREIGN_KEY_CHECKS = 0; 
     TRUNCATE TABLE employee_dw.Fact_PerformanceReviews;
+    
     INSERT INTO employee_dw.Fact_PerformanceReviews (
         employee_sk, department_sk, date_key, reviewer_employee_sk,
         review_period, performance_rating, job_satisfaction, work_life_balance, percent_salary_hike
@@ -100,6 +107,8 @@ BEGIN
     LEFT JOIN employee_oltp.Employees rev ON pr.reviewer_id = rev.employee_id
     LEFT JOIN employee_dw.Dim_Employee dim_r ON rev.employee_code = dim_r.employee_code 
       AND pr.review_date >= dim_r.start_date AND pr.review_date < dim_r.end_date;
+      
+    SET FOREIGN_KEY_CHECKS = 1;
 END$$
 
 -- 6. Load Fact_ProjectAllocations
@@ -120,4 +129,4 @@ BEGIN
     JOIN employee_dw.Dim_Project dp ON p.project_code = dp.project_code;
 END$$
 
-DELIMITER ;
+DELIMITER ;     
