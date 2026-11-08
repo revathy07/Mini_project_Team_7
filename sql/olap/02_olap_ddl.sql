@@ -26,7 +26,12 @@ CREATE TABLE Dim_Employee (
   start_date      DATE NOT NULL,
   end_date        DATE NOT NULL DEFAULT '9999-12-31',
   is_current      BOOLEAN NOT NULL DEFAULT TRUE,
-  INDEX idx_employee_current (employee_code, is_current)
+  
+  -- Index for SCD2 logic
+  INDEX idx_employee_current (employee_code, is_current),
+  
+  -- NEW INDEX: Speeds up the Fact table date-range joins
+  INDEX idx_emp_scd_dates (employee_code, start_date, end_date) 
 );
 
 CREATE TABLE Dim_Project (
@@ -52,7 +57,7 @@ CREATE TABLE Fact_PerformanceReviews (
   department_sk        INT NOT NULL,
   date_key             INT NOT NULL,
   reviewer_employee_sk INT,
-  review_period        VARCHAR(10),
+  review_period        VARCHAR(20),
   performance_rating   INT,
   job_satisfaction     INT,
   work_life_balance    INT,
