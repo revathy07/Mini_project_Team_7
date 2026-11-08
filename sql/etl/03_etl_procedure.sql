@@ -24,7 +24,7 @@ BEGIN
     
     INSERT INTO employee_dw.Dim_Date (date_key, full_date, day_of_week, month_name, quarter, year)
     WITH RECURSIVE date_series AS (
-        SELECT '2010-01-01' AS dt
+        SELECT CAST('2010-01-01' AS DATE) AS dt
         UNION ALL
         SELECT DATE_ADD(dt, INTERVAL 1 DAY) FROM date_series WHERE dt < '2030-12-31'
     )
