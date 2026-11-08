@@ -35,11 +35,16 @@ CREATE TABLE Dim_Employee (
 );
 
 CREATE TABLE Dim_Project (
-  project_sk      INT AUTO_INCREMENT PRIMARY KEY,
-  project_code    VARCHAR(20) NOT NULL UNIQUE,
-  project_name    VARCHAR(150) NOT NULL,
-  department_name VARCHAR(100),
-  status          VARCHAR(20)
+  project_sk        INT AUTO_INCREMENT PRIMARY KEY,
+  project_code      VARCHAR(20) NOT NULL UNIQUE,
+  project_name      VARCHAR(150) NOT NULL,
+  department_name   VARCHAR(100),
+  status            VARCHAR(20),
+  priority          VARCHAR(10),
+  start_date        DATE,
+  planned_end_date  DATE,
+  end_date          DATE,
+  budget            DECIMAL(12,2)
 );
 
 CREATE TABLE Dim_Date (
@@ -52,16 +57,19 @@ CREATE TABLE Dim_Date (
 );
 
 CREATE TABLE Fact_PerformanceReviews (
-  review_sk            INT AUTO_INCREMENT PRIMARY KEY,
-  employee_sk          INT NOT NULL,
-  department_sk        INT NOT NULL,
-  date_key             INT NOT NULL,
-  reviewer_employee_sk INT,
-  review_period        VARCHAR(20),
-  performance_rating   INT,
-  job_satisfaction     INT,
-  work_life_balance    INT,
-  percent_salary_hike  DECIMAL(5,2),
+  review_sk              INT AUTO_INCREMENT PRIMARY KEY,
+  employee_sk            INT NOT NULL,
+  department_sk          INT NOT NULL,
+  date_key               INT NOT NULL,
+  reviewer_employee_sk   INT,
+  review_period          VARCHAR(20),
+  performance_score      DECIMAL(3,2),
+  performance_rating     INT,
+  goal_achievement_pct   DECIMAL(5,1),
+  peer_feedback_score    DECIMAL(3,2),
+  promotion_recommended  BOOLEAN,
+  INDEX idx_fact_emp (employee_sk),
+  INDEX idx_fact_date (date_key),
   FOREIGN KEY (employee_sk)          REFERENCES Dim_Employee(employee_sk),
   FOREIGN KEY (department_sk)        REFERENCES Dim_Department(department_sk),
   FOREIGN KEY (date_key)             REFERENCES Dim_Date(date_key),
