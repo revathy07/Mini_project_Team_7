@@ -68,7 +68,7 @@ CREATE TABLE Performance_Reviews (
   employee_id          INT NOT NULL,
   reviewer_id          INT,
   review_date          DATE NOT NULL,
-  review_period        VARCHAR(10) NOT NULL,
+  review_period        VARCHAR(20) NOT NULL,
   performance_rating   INT,
   job_satisfaction     INT,
   work_life_balance    INT,
