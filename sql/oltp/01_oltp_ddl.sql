@@ -54,10 +54,13 @@ CREATE TABLE Projects (
   project_code        VARCHAR(20) UNIQUE NOT NULL,
   project_name        VARCHAR(150) NOT NULL,
   department_id       INT,
-  project_manager_id  INT,
+  project_manager_id  INT NULL,
   start_date          DATE NOT NULL,
+  planned_end_date    DATE,
   end_date            DATE,
+  budget              DECIMAL(12,2),
   status              VARCHAR(20) DEFAULT 'Active',
+  priority            VARCHAR(10),
   FOREIGN KEY (department_id)      REFERENCES Departments(department_id),
   FOREIGN KEY (project_manager_id) REFERENCES Employees(employee_id)
 );
