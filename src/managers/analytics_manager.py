@@ -7,7 +7,7 @@ class AnalyticsManager(DatabaseConnection):
 
     def __init__(self):
         super().__init__()
-        self.database_name = "employee_dw"
+        self.database_name = self.database_for("dw")
 
     # --------------------------------------------------
     # 1. GET CURRENT EMPLOYEE HEADCOUNT
@@ -24,7 +24,7 @@ class AnalyticsManager(DatabaseConnection):
             query = """
                 SELECT COUNT(*)
                 FROM Dim_Employee
-                WHERE is_current = 1
+                WHERE is_current = 1 AND attrition_flag = 0
             """
 
             cursor.execute(query)
@@ -60,7 +60,7 @@ class AnalyticsManager(DatabaseConnection):
                     department_name,
                     COUNT(*) AS employee_count
                 FROM Dim_Employee
-                WHERE is_current = 1
+                WHERE is_current = 1 AND attrition_flag = 0
                 GROUP BY department_name
                 ORDER BY employee_count DESC
             """
