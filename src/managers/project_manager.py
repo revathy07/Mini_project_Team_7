@@ -1,12 +1,15 @@
 
 from mysql.connector import Error
 from datetime import datetime
-from src.database.db_manager import DatabaseConnection
+import uuid
+
+from src.database.base_manager import BaseManager
+from src.database.exceptions import ValidationError
 from src.entities.project import Project
 
 
-class ProjectManager(DatabaseConnection):
-
+class ProjectManager(BaseManager):
+    database_kind = "oltp"
     # Fields allowed to be updated in the Projects table
     ALLOWED_PROJECT_FIELDS = {
         "project_code",
@@ -20,10 +23,6 @@ class ProjectManager(DatabaseConnection):
         "status",
         "priority"
     }
-
-    def __init__(self):
-        super().__init__()
-        self.database_name = "employee_oltp"
 
     # --------------------------------------------------
     # 1. ADD PROJECT
@@ -521,3 +520,72 @@ class ProjectManager(DatabaseConnection):
                 cursor.close()
             if connection and connection.is_connected():
                 connection.close()
+
+        # --------------------------------------------------
+    # CREATE PROJECT (used by the UI)
+    # --------------------------------------------------
+    INSERT_FIELDS = (
+        "project_code", "project_name", "department_id", "project_manager_id",
+        "start_date", "planned_end_date", "end_date", "budget",
+        "status", "priority",
+    )
+
+    def create_project(self, project):
+        """Insert project and assign the next PROJ-##### code.
+        Returns (project_id, project_code). All-or-nothing."""
+        try:
+            project.validate()
+        except ValueError as err:
+            raise ValidationError(str(err)) from err
+
+        temp_code = "TMP-" + uuid.uuid4().hex[:12]
+        values = [
+            temp_code if field == "project_code" else getattr(project, field)
+            for field in self.INSERT_FIELDS
+        ]
+        sql = (
+            f"INSERT INTO Projects ({', '.join(self.INSERT_FIELDS)}) "
+            f"VALUES ({', '.join(['%s'] * len(self.INSERT_FIELDS))})"
+        )
+
+        with self.transaction() as cursor:
+            cursor.execute(sql, values)
+            project_id = cursor.lastrowid
+            code = f"PROJ-{project_id:05d}"
+            cursor.execute(
+                "UPDATE Projects SET project_code = %s WHERE project_id = %s",
+                (code, project_id),
+            )
+
+        project.project_id, project.project_code = project_id, code
+        return project_id, code
+
+    # --------------------------------------------------
+    # SEARCH PROJECTS
+    # --------------------------------------------------
+    def search_projects(self, term="", department_id=None, status=None, limit=50):
+        conditions, params = [], []
+        term = (term or "").strip()
+
+        if term:
+            conditions.append("(p.project_name LIKE %s OR p.project_code LIKE %s)")
+            params += [f"%{term}%", f"{term}%"]
+        if department_id is not None:
+            conditions.append("p.department_id = %s")
+            params.append(department_id)
+        if status:
+            conditions.append("p.status = %s")
+            params.append(status)
+
+        where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+        sql = f"""
+            SELECT p.project_id, p.project_code, p.project_name,
+                   d.department_name, p.status, p.priority, p.start_date,
+                   p.planned_end_date, p.end_date, p.budget
+            FROM Projects p
+            LEFT JOIN Departments d ON d.department_id = p.department_id
+            {where}
+            ORDER BY p.project_id DESC
+            LIMIT %s
+        """
+        return self.fetch_all(sql, tuple(params) + (int(limit),))

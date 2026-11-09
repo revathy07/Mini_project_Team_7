@@ -1,5 +1,10 @@
 """UI-facing data access: cached DataFrames built from AnalyticsManager.
 No SQL lives here or in the pages."""
+from src.entities.employee import Employee
+from src.entities.project import Project
+from src.managers.employee_manager import EmployeeManager
+from src.managers.project_manager import ProjectManager
+
 import pandas as pd
 import streamlit as st
 
@@ -73,3 +78,68 @@ def project_status():
     rows = _analytics().get_project_status_distribution()
     cols = ["status", "project_count"]
     return _frame(rows, cols, numeric=["project_count"])
+
+# ---------------------------------------------------------------
+# OLTP: lookups, search, and writes (used by the form pages)
+# ---------------------------------------------------------------
+@st.cache_resource
+def _employees():
+    return EmployeeManager()
+
+
+@st.cache_resource
+def _projects():
+    return ProjectManager()
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def departments():
+    """{department_id: department_name}, sorted by name."""
+    rows = _employees().list_departments()
+    return {row["department_id"]: row["department_name"] for row in rows}
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def job_roles(department_id):
+    return _employees().list_job_roles(department_id)
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def managers(department_id):
+    """{employee_id: 'Name (EMP-000123)'} for the manager dropdown."""
+    rows = _employees().list_managers(department_id)
+    return {row["employee_id"]: row["label"] for row in rows}
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def employee_search(term, department_id, active_only):
+    rows = _employees().search_employees(term, department_id, active_only, limit=50)
+    cols = ["employee_code", "full_name", "email", "department_name",
+            "job_role", "job_level", "monthly_income", "hire_date", "status"]
+    return _frame(rows, cols, numeric=["monthly_income"])
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def project_search(term, department_id, status):
+    rows = _projects().search_projects(term, department_id, status, limit=50)
+    cols = ["project_code", "project_name", "department_name", "status",
+            "priority", "start_date", "planned_end_date", "end_date", "budget"]
+    return _frame(rows, cols, numeric=["budget"])
+
+
+def onboard_employee(**fields):
+    """Create an employee. Returns (employee_id, employee_code).
+    Raises DataAccessError (ValidationError, DuplicateRecordError, ...)."""
+    employee = Employee(employee_code="PENDING", **fields)
+    result = _employees().create_employee(employee)
+    employee_search.clear()
+    managers.clear()
+    return result
+
+
+def register_project(**fields):
+    """Create a project. Returns (project_id, project_code)."""
+    project = Project(project_code="PENDING", **fields)
+    result = _projects().create_project(project)
+    project_search.clear()
+    return result

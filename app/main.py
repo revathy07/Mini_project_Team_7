@@ -14,6 +14,8 @@ st.set_page_config(page_title="Employee Analytics", page_icon="📊", layout="wi
 
 pages = [
     st.Page("views/overview.py", title="Overview", icon="📊", default=True),
+    st.Page("views/employees.py", title="Employees", icon="👥"),
+    st.Page("views/projects.py", title="Projects", icon="📁"),
 ]
 navigation = st.navigation(pages)
 
