@@ -1,13 +1,11 @@
 
 from mysql.connector import Error
-from src.database.db_manager import DatabaseConnection
+from src.database.base_manager import BaseManager
 
 
-class AnalyticsManager(DatabaseConnection):
+class AnalyticsManager(BaseManager):
 
-    def __init__(self):
-        super().__init__()
-        self.database_name = self.database_for("dw")
+    database_kind = "dw"
 
     # --------------------------------------------------
     # 1. GET CURRENT EMPLOYEE HEADCOUNT
@@ -360,3 +358,106 @@ class AnalyticsManager(DatabaseConnection):
 
             if connection and connection.is_connected():
                 connection.close()
+
+        # --------------------------------------------------
+    # 9. REVIEW YEAR RANGE (for the year slider)
+    # --------------------------------------------------
+    def get_review_year_range(self):
+        return self.fetch_one(
+            "SELECT MIN(date_key) DIV 10000 AS min_year, "
+            "       MAX(date_key) DIV 10000 AS max_year "
+            "FROM Fact_PerformanceReviews"
+        )
+
+    # --------------------------------------------------
+    # 10. YEARLY TREND PER DEPARTMENT
+    #     department_sk = department the employee had ON the review date (SCD2)
+    # --------------------------------------------------
+    def get_yearly_trend_by_department(self):
+        return self.fetch_all("""
+            SELECT dt.year,
+                   dd.department_name,
+                   ROUND(AVG(f.performance_score), 2) AS avg_score,
+                   COUNT(*) AS reviews
+            FROM Fact_PerformanceReviews f
+            JOIN Dim_Date dt       ON dt.date_key = f.date_key
+            JOIN Dim_Department dd ON dd.department_sk = f.department_sk
+            GROUP BY dt.year, dd.department_name
+            ORDER BY dt.year, dd.department_name
+        """)
+
+    # --------------------------------------------------
+    # 11. TOP PERFORMERS PER DEPARTMENT (CTE + DENSE_RANK)
+    #     Active employees only. Department = current department.
+    # --------------------------------------------------
+    def get_top_performers(self, year_from, year_to, min_reviews=3, top_n=5):
+        return self.fetch_all("""
+            WITH emp_scores AS (
+                SELECT cur.employee_code,
+                       cur.full_name,
+                       cur.department_name,
+                       cur.job_role,
+                       ROUND(AVG(f.performance_score), 2)    AS avg_score,
+                       ROUND(AVG(f.goal_achievement_pct), 1) AS avg_goal,
+                       COUNT(*)                              AS review_count
+                FROM Fact_PerformanceReviews f
+                JOIN Dim_Employee de  ON de.employee_sk = f.employee_sk
+                JOIN Dim_Employee cur ON cur.employee_code = de.employee_code
+                                     AND cur.is_current = 1
+                WHERE f.date_key BETWEEN %s AND %s
+                  AND cur.attrition_flag = 0
+                GROUP BY cur.employee_code, cur.full_name,
+                         cur.department_name, cur.job_role
+                HAVING COUNT(*) >= %s
+            ),
+            ranked AS (
+                SELECT emp_scores.*,
+                       DENSE_RANK() OVER (
+                           PARTITION BY department_name
+                           ORDER BY avg_score DESC, review_count DESC
+                       ) AS dept_rank
+                FROM emp_scores
+            )
+            SELECT department_name, dept_rank, employee_code, full_name,
+                   job_role, avg_score, avg_goal, review_count
+            FROM ranked
+            WHERE dept_rank <= %s
+            ORDER BY department_name, dept_rank, employee_code
+        """, (int(year_from) * 10000 + 101, int(year_to) * 10000 + 1231,
+              int(min_reviews), int(top_n)))
+
+    # --------------------------------------------------
+    # 12. PROJECT DELAY (completed projects only)
+    # --------------------------------------------------
+    def get_project_delay_summary(self):
+        return self.fetch_all("""
+            SELECT department_name,
+                   priority,
+                   COUNT(*) AS projects,
+                   ROUND(AVG(DATEDIFF(end_date, planned_end_date)), 1) AS avg_delay_days,
+                   ROUND(100 * AVG(end_date > planned_end_date), 1)    AS pct_delayed
+            FROM Dim_Project
+            WHERE status = 'Completed'
+              AND end_date IS NOT NULL
+              AND planned_end_date IS NOT NULL
+            GROUP BY department_name, priority
+            ORDER BY department_name,
+                     FIELD(priority, 'Low', 'Medium', 'High', 'Critical')
+        """)
+
+    # --------------------------------------------------
+    # 13. OVERDUE OPEN PROJECTS (COUNT() OVER gives the full total before LIMIT)
+    # --------------------------------------------------
+    def get_overdue_projects(self, limit=25):
+        return self.fetch_all("""
+            SELECT project_code, project_name, department_name, priority, status,
+                   planned_end_date,
+                   DATEDIFF(CURDATE(), planned_end_date) AS days_overdue,
+                   budget,
+                   COUNT(*) OVER () AS total_overdue
+            FROM Dim_Project
+            WHERE status IN ('Active', 'On Hold')
+              AND planned_end_date < CURDATE()
+            ORDER BY days_overdue DESC, budget DESC
+            LIMIT %s
+        """, (int(limit),))
