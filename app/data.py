@@ -3,6 +3,11 @@ No SQL lives here or in the pages."""
 import pandas as pd
 import streamlit as st
 
+from src.database.exceptions import DataAccessError
+from src.entities.review import Review
+from src.managers.review_manager import ReviewManager
+from src.managers.warehouse_sync import WarehouseSync
+
 from src.entities.employee import Employee
 from src.entities.project import Project
 from src.managers.employee_manager import EmployeeManager
@@ -207,7 +212,68 @@ def project_search(term, department_id, status):
     cols = ["project_code", "project_name", "department_name", "status",
             "priority", "start_date", "planned_end_date", "end_date", "budget"]
     return _frame(rows, cols, numeric=["budget"])
+# ---------------------------------------------------------------
+# Reviews: form support + warehouse sync
+# ---------------------------------------------------------------
+@st.cache_resource
+def _reviews():
+    return ReviewManager()
 
+
+@st.cache_resource
+def _warehouse():
+    return WarehouseSync()
+
+
+def employee_choices(term):
+    """{employee_id: label} for up to 20 active matches. Needs 2+ characters,
+    so the 100K-row table is never listed."""
+    term = (term or "").strip()
+    if len(term) < 2:
+        return {}
+    rows = _employees().search_employees(term, None, True, limit=20)
+    return {
+        row["employee_id"]:
+            f"{row['full_name']} ({row['employee_code']}) - {row['department_name']}"
+        for row in rows
+    }
+
+
+def employee_summary(employee_id):
+    return _employees().get_employee_summary(employee_id)
+
+
+def employee_review_history(employee_id):
+    rows = _reviews().list_employee_reviews(employee_id, 10)
+    cols = ["review_date", "review_period", "performance_score", "performance_rating",
+            "goal_achievement_pct", "peer_feedback_score", "promotion_recommended"]
+    return _frame(rows, cols, numeric=cols[2:6])
+
+
+def sync_reviews():
+    """Push new reviews to the warehouse, then drop cached dashboard data."""
+    _warehouse().refresh_reviews()
+    st.cache_data.clear()
+
+
+def submit_review(**fields):
+    """Save a review in OLTP, then try to sync it to the warehouse.
+    OLTP save failing raises DataAccessError. Sync failing does NOT raise:
+    the review is saved, and the result carries a warning to show."""
+    review = Review(**fields)
+    review_id = _reviews().create_review(review)     # committed here
+
+    result = {"review_id": review_id, "synced": False, "warning": None}
+    try:
+        sync_reviews()
+        result["synced"] = _warehouse().is_review_loaded(review_id)
+        if not result["synced"]:
+            result["warning"] = (
+                "Saved. The warehouse has no version of this employee covering "
+                "the review date yet, so dashboards will not count it until it does.")
+    except DataAccessError as err:
+        result["warning"] = f"Saved, but the warehouse refresh failed: {err}"
+    return result
 
 def onboard_employee(**fields):
     """Create an employee. Returns (employee_id, employee_code).

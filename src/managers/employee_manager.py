@@ -509,3 +509,19 @@ class EmployeeManager(BaseManager):
             "ORDER BY job_level DESC, last_name, first_name LIMIT %s",
             (department_id, int(limit)),
         )
+    
+    # --------------------------------------------------
+    # 10. ONE-ROW SUMMARY (form headers, default reviewer)
+    # --------------------------------------------------
+    def get_employee_summary(self, employee_id):
+        return self.fetch_one("""
+            SELECT e.employee_id, e.employee_code,
+                   CONCAT(e.first_name, ' ', e.last_name) AS full_name,
+                   d.department_name, e.job_role, e.hire_date, e.termination_date,
+                   e.manager_id,
+                   CONCAT(m.first_name, ' ', m.last_name) AS manager_name
+            FROM Employees e
+            JOIN Departments d ON d.department_id = e.department_id
+            LEFT JOIN Employees m ON m.employee_id = e.manager_id
+            WHERE e.employee_id = %s
+        """, (employee_id,))

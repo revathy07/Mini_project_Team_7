@@ -58,6 +58,7 @@ CREATE TABLE Dim_Date (
 
 CREATE TABLE Fact_PerformanceReviews (
   review_sk              INT AUTO_INCREMENT PRIMARY KEY,
+  review_id              INT NOT NULL,
   employee_sk            INT NOT NULL,
   department_sk          INT NOT NULL,
   date_key               INT NOT NULL,
@@ -68,6 +69,7 @@ CREATE TABLE Fact_PerformanceReviews (
   goal_achievement_pct   DECIMAL(5,1),
   peer_feedback_score    DECIMAL(3,2),
   promotion_recommended  BOOLEAN,
+  UNIQUE KEY uq_fact_review (review_id),
   INDEX idx_fact_emp (employee_sk),
   INDEX idx_fact_date (date_key),
   FOREIGN KEY (employee_sk)          REFERENCES Dim_Employee(employee_sk),
@@ -78,11 +80,13 @@ CREATE TABLE Fact_PerformanceReviews (
 
 CREATE TABLE Fact_ProjectAllocations (
   allocation_sk         INT AUTO_INCREMENT PRIMARY KEY,
+  assignment_id         INT NOT NULL,
   employee_sk           INT NOT NULL,
   project_sk            INT NOT NULL,
   date_key              INT NOT NULL,
   role_in_project       VARCHAR(50),
   allocation_percentage INT,
+  UNIQUE KEY uq_fact_assignment (assignment_id),
   FOREIGN KEY (employee_sk) REFERENCES Dim_Employee(employee_sk),
   FOREIGN KEY (project_sk)  REFERENCES Dim_Project(project_sk),
   FOREIGN KEY (date_key)    REFERENCES Dim_Date(date_key)

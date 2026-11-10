@@ -1,14 +1,17 @@
 
 from mysql.connector import Error
-from src.database.db_manager import DatabaseConnection
+
+from datetime import date
+
+from src.database.base_manager import BaseManager
+from src.database.exceptions import NotFoundError, ValidationError
+
 from src.entities.review import Review
 
 
-class ReviewManager(DatabaseConnection):
+class ReviewManager(BaseManager):
 
-    def __init__(self):
-        super().__init__()
-        self.database_name = "employee_oltp"
+    database_kind = "oltp"
 
     # --------------------------------------------------
     # 1. ADD PERFORMANCE REVIEW
@@ -351,3 +354,76 @@ class ReviewManager(DatabaseConnection):
 
             if connection and connection.is_connected():
                 connection.close()
+
+        # --------------------------------------------------
+    # 7. CREATE REVIEW (used by the UI)
+    # --------------------------------------------------
+    INSERT_SQL = """
+        INSERT INTO Performance_Reviews (
+            employee_id, reviewer_id, review_date, review_period,
+            performance_score, performance_rating, goal_achievement_pct,
+            peer_feedback_score, promotion_recommended, comments)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+    """
+
+    def create_review(self, review):
+        """Validate, check dates against the employee's tenure, insert.
+        Returns review_id. All-or-nothing."""
+        if (review.performance_rating is None
+                and review.performance_score is not None):
+            review.performance_rating = min(
+                5, max(1, round(float(review.performance_score))))
+
+        try:
+            review.validate()
+        except ValueError as err:
+            raise ValidationError(str(err)) from err
+
+        if not isinstance(review.review_date, date):
+            raise ValidationError("Review date must be a valid date.")
+        if review.review_date > date.today():
+            raise ValidationError("Review date cannot be in the future.")
+        if review.review_date.year < 2010:
+            raise ValidationError(
+                "Review date must be 2010 or later (warehouse calendar range).")
+        if review.reviewer_id is not None and review.reviewer_id == review.employee_id:
+            raise ValidationError("An employee cannot review themselves.")
+
+        with self.transaction() as cursor:
+            cursor.execute(
+                "SELECT hire_date, termination_date FROM Employees "
+                "WHERE employee_id = %s", (review.employee_id,))
+            row = cursor.fetchone()
+            if row is None:
+                raise NotFoundError("Employee not found.")
+            hire, termination = row
+
+            if review.review_date < hire:
+                raise ValidationError(
+                    f"Review date is before the hire date ({hire}).")
+            if termination is not None and review.review_date > termination:
+                raise ValidationError(
+                    f"Review date is after the employee left ({termination}).")
+
+            cursor.execute(self.INSERT_SQL, (
+                review.employee_id, review.reviewer_id, review.review_date,
+                review.review_period, review.performance_score,
+                review.performance_rating, review.goal_achievement_pct,
+                review.peer_feedback_score, review.promotion_recommended,
+                review.comments))
+            review_id = cursor.lastrowid
+
+        review.review_id = review_id
+        return review_id
+
+    # --------------------------------------------------
+    # 8. RECENT REVIEWS OF ONE EMPLOYEE (plain rows for display)
+    # --------------------------------------------------
+    def list_employee_reviews(self, employee_id, limit=10):
+        return self.fetch_all(
+            "SELECT review_date, review_period, performance_score, "
+            "       performance_rating, goal_achievement_pct, "
+            "       peer_feedback_score, promotion_recommended "
+            "FROM Performance_Reviews WHERE employee_id = %s "
+            "ORDER BY review_date DESC LIMIT %s",
+            (employee_id, int(limit)))
