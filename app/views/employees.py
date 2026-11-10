@@ -3,9 +3,12 @@ from datetime import date
 import streamlit as st
 
 from app import data
+from app.iam import can, current_user
 from src.database.exceptions import DataAccessError
 
 st.title("Employees")
+user = current_user()
+can_manage = can(user, "manage_employees")
 
 try:
     dept_map = data.departments()
@@ -62,9 +65,11 @@ with tab_onboard:
             experience = st.number_input("Total working years",
                                          min_value=0, max_value=50, value=0)
 
-        submitted = st.form_submit_button("Create employee")
+        submitted = st.form_submit_button(
+            "Create employee", disabled=not can_manage
+        )
 
-    if submitted:
+    if submitted and can_manage:
         try:
             employee_id, code, warning = data.onboard_employee(
                 first_name=first_name.strip(),

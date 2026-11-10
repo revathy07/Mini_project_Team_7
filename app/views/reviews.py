@@ -3,21 +3,25 @@ from datetime import date
 import streamlit as st
 
 from app import data
+from app.iam import can, current_user
 from src.database.exceptions import DataAccessError
 
 st.title("Performance reviews")
+user = current_user()
+can_submit = can(user, "submit_reviews")
 
 # ---------- manual sync (also the retry path) ----------
-with st.expander("Warehouse sync"):
-    st.caption("A saved review reaches the dashboards after a sync. This runs "
-               "automatically on submit. Use the button to retry if it failed.")
-    if st.button("Sync reviews to warehouse now"):
-        try:
-            data.sync_reviews()
-        except DataAccessError as err:
-            st.error(str(err))
-        else:
-            st.success("Warehouse is up to date.")
+if can(user, "sync_warehouse"):
+    with st.expander("Warehouse sync"):
+        st.caption("A saved review reaches the dashboards after a sync. This runs "
+                   "automatically on submit. Use the button to retry if it failed.")
+        if st.button("Sync reviews to warehouse now"):
+            try:
+                data.sync_reviews()
+            except DataAccessError as err:
+                st.error(str(err))
+            else:
+                st.success("Warehouse is up to date.")
 
 # ---------- pick employee ----------
 term = st.text_input("Find employee (name, code or email, at least 2 characters)",
@@ -80,9 +84,11 @@ with st.form(f"submit_review_{employee_id}"):
     promotion = st.checkbox("Recommend for promotion")
     comments = st.text_area("Comments (optional)")
 
-    submitted = st.form_submit_button("Submit review")
+    submitted = st.form_submit_button(
+        "Submit review", disabled=not can_submit
+    )
 
-if submitted:
+if submitted and can_submit:
     try:
         result = data.submit_review(
             employee_id=employee_id,

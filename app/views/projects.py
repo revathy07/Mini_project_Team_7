@@ -3,9 +3,11 @@ from datetime import date, timedelta
 import streamlit as st
 
 from app import data
+from app.iam import can, current_user
 from src.database.exceptions import DataAccessError
 
 st.title("Projects")
+can_manage = can(current_user(), "manage_projects")
 
 try:
     dept_map = data.departments()
@@ -48,9 +50,11 @@ with tab_create:
             "Project manager (optional)", options=[None, *managers],
             format_func=lambda m: "none" if m is None else managers[m])
 
-        submitted = st.form_submit_button("Create project")
+        submitted = st.form_submit_button(
+            "Create project", disabled=not can_manage
+        )
 
-    if submitted:
+    if submitted and can_manage:
         try:
             project_id, code = data.register_project(
                 project_name=name.strip(),

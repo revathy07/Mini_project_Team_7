@@ -1,45 +1,105 @@
-# Employee Analytics - ETL Pipeline Documentation
+# Employee Analytics ETL pipeline
 
-This document explains the architecture of the ETL pipeline, the purpose of each script, and the exact sequence of commands required to build and populate the Data Warehouse.
+This guide describes how to initialize the MySQL schemas and load the
+provided/generated CSV data through staging, OLTP, and the data warehouse.
+Use MySQL Workbench or another MySQL client to execute the SQL files. Run
+Python commands from the repository root with the project environment
+installed (`uv sync`).
 
-## File Explanations
+## Important: database initialization is destructive
 
-### 1. Database Setup (SQL)
-*   **`sql/staging/01_staging_ddl.sql`**: Creates the staging area. Raw CSVs are loaded here first to prevent corrupting the main database.
-*   **`sql/oltp/02_oltp_ddl.sql`**: Creates the operational database (`employee_oltp`). This is a normalized (3NF) schema designed for the Streamlit app's daily transactions.
-*   **`sql/warehouse/03_olap_ddl.sql`**: Creates the Data Warehouse (`employee_dw`). This is a Star Schema containing Fact tables and Dimension tables, with optimized indexes.
-*   **`sql/procedures/04_etl_procedures.sql`**: Creates the Stored Procedures. These contain the "brains" of the ETL—handling SCD Type 2 for employee history, mapping surrogate keys, and formatting dates.
+The schema scripts below use `DROP DATABASE IF EXISTS` before recreating their
+database. Running them deletes the existing contents of that database. Back
+up any data you need and verify the target server and `.env` settings before
+running them. Do not execute the DDL against a database you need to preserve.
 
-### 2. Data Loading & Orchestration (Python)
-*   **`src/etls/load_staging.py`**: (If used) A helper script to bulk-load CSV data into the Staging tables.
-*   **`src/etls/run_oltp_load.py`**: The bulk loader. It reads the synthetic CSVs, cleans the data, and pushes it into the Staging tables. It then triggers the SQL procedures to move data into the OLTP database.
-*   **`src/etls/run_dw_etl.py`**: The Python orchestrator. It connects to MySQL, executes the ETL Stored Procedures, and performs **data reconciliation checks** (verifying row counts and SCD2 date ranges). Because it bypasses the Workbench GUI, it prevents 30-second timeout errors when processing 490,000+ rows.
+The application IAM bootstrap is separate: it creates `app_users` in the OLTP
+database with `CREATE TABLE IF NOT EXISTS` and does not recreate a database.
+See the [project guide](./README.md#iam-and-access).
 
----
+## SQL file map
 
-## Step-by-Step Execution Sequence
+- `sql/staging/01_staging_ddl.sql` — recreates `employee_staging` and its
+  landing tables.
+- `sql/oltp/01_oltp_ddl.sql` — recreates `employee_oltp` and its normalized
+  operational tables.
+- `sql/olap/02_olap_ddl.sql` — recreates `employee_dw` and its dimensions and
+  fact tables.
+- `sql/oltp/02_load_from_staging.sql` — creates
+  `sp_load_oltp_from_staging()`.
+- `sql/etl/03_etl_procedure.sql` — creates the warehouse dimension and fact
+  load procedures other than employee history.
+- `sql/etl/05_dim_employee.sql` — creates the employee SCD Type 2 history
+  load procedures.
+- `sql/etl/04_run_etl.sql` — optional SQL script to execute a full warehouse
+  load after the schema and procedures exist.
 
-Follow this exact order to build the project from scratch.
+## First-time database setup
 
-### Phase 1: Database Creation
-Open **MySQL Workbench** and run these scripts in order:
+Connect to the intended MySQL server and execute these scripts in order:
+
 1. `sql/staging/01_staging_ddl.sql`
-2. `sql/oltp/02_oltp_ddl.sql`
-3. `sql/warehouse/03_olap_ddl.sql`
-4. `sql/procedures/04_etl_procedures.sql`
+2. `sql/oltp/01_oltp_ddl.sql`
+3. `sql/olap/02_olap_ddl.sql`
+4. `sql/oltp/02_load_from_staging.sql`
+5. `sql/etl/03_etl_procedure.sql`
+6. `sql/etl/05_dim_employee.sql`
 
-### Phase 2: Execute the Pipeline (Python)
-Open your terminal in VS Code (ensure `.venv` is activated) and run:
-1. `python src/etls/run_oltp_load.py`
-    *   *Expected Output:* Loads raw data into Staging, then moves ~100k employees, ~141k assignments, and ~491k reviews into the OLTP database.
-2. `python src/etls/run_dw_etl.py`
-    *   *Expected Output:* Executes the procedures to populate the Data Warehouse. It will take 60–90 seconds to load the Fact tables and will print reconciliation success messages.
+Set `.env` to point to those databases. The default names are
+`employee_staging`, `employee_oltp`, and `employee_dw`; the database names can
+be overridden with `DB_STAGING`, `DB_OLTP`, and `DB_DW`.
 
-### Phase 3: Verify the Data Warehouse
-Run this query in MySQL Workbench to confirm the Star Schema is fully populated:
+## Load and transform data
+
+The processed CSVs are already available under `data/processed/`. To rebuild
+them from the synthesizer, run:
+
+```bash
+uv run python -m src.synthesizer.pipeline
+```
+
+The default synthesis target is 100,000 employees and 1,500 projects. To
+choose different counts:
+
+```bash
+uv run python -m src.synthesizer.pipeline --employees 100000 --projects 1500
+```
+
+Load staging, populate OLTP, then build the warehouse:
+
+```bash
+uv run python src/etls/load_staging.py
+uv run python src/etls/run_oltp_load.py
+uv run python src/etls/run_dw_etl.py
+```
+
+Each loader reports row counts and reconciliation checks. Stop and investigate
+any failed check before proceeding to the next stage.
+
+## Data flow
+
+1. `load_staging.py` loads CSV files from `data/processed/` into staging
+   tables.
+2. `run_oltp_load.py` calls `sp_load_oltp_from_staging()` and verifies OLTP
+   counts and referential-integrity checks.
+3. `run_dw_etl.py` loads warehouse dimensions and facts, including the
+   employee-history dimension, and runs reconciliation checks.
+
+The `Dim_Employee` SCD Type 2 procedure uses half-open date ranges
+`[start_date, end_date)`. The full history load rebuilds that dimension, so
+warehouse fact tables must be loaded afterward; the ETL order does this.
+
+## Verify the warehouse
+
+After a successful run, use MySQL Workbench to check representative row counts:
+
 ```sql
-USE employee_dw;
-SELECT COUNT(*) FROM Dim_Employee;                 -- Expected: ~160,136
-SELECT COUNT(*) FROM Dim_Department;               -- Expected: 3
-SELECT COUNT(*) FROM Fact_PerformanceReviews;      -- Expected: ~491,000
-SELECT COUNT(*) FROM Fact_ProjectAllocations;      -- Expected: ~141,000
+SELECT COUNT(*) FROM employee_dw.Dim_Employee;
+SELECT COUNT(*) FROM employee_dw.Dim_Department;
+SELECT COUNT(*) FROM employee_dw.Fact_PerformanceReviews;
+SELECT COUNT(*) FROM employee_dw.Fact_ProjectAllocations;
+```
+
+The counts depend on the input data and synthesis options. The Python ETL
+scripts compare actual table counts with their source counts and print
+pass/fail checks.
