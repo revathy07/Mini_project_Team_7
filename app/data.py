@@ -20,6 +20,7 @@ from src.managers.project_manager import ProjectManager
 from src.database.db_manager import DatabaseConnection
 from src.managers.analytics_manager import AnalyticsManager
 from src.managers.oltp_analytics_manager import OltpAnalyticsManager
+from app.iam import require_permission
 
 CACHE_SECONDS = 600
 
@@ -204,11 +205,11 @@ def managers(department_id):
 
 @st.cache_data(ttl=60, show_spinner=False)
 def employee_search(term, department_id, active_only):
-    rows = _employees().search_employees(term, department_id, active_only, limit=50)
+    rows = _employees().search_employees(
+        term, department_id, active_only, limit=50)
     cols = ["employee_code", "full_name", "email", "department_name",
             "job_role", "job_level", "monthly_income", "hire_date", "status"]
     return _frame(rows, cols, numeric=["monthly_income"])
-
 
 @st.cache_data(ttl=60, show_spinner=False)
 def project_search(term, department_id, status):
@@ -256,6 +257,11 @@ def employee_review_history(employee_id):
 
 def sync_reviews():
     """New hires first (so their reviews can load), then reviews."""
+    require_permission("sync_warehouse")
+    _sync_reviews()
+
+
+def _sync_reviews():
     _warehouse().refresh_employees(date.today())
     _warehouse().refresh_reviews()
     st.cache_data.clear()
@@ -265,12 +271,14 @@ def submit_review(**fields):
     """Save a review in OLTP, then try to sync it to the warehouse.
     OLTP save failing raises DataAccessError. Sync failing does NOT raise:
     the review is saved, and the result carries a warning to show."""
+    require_permission("submit_reviews")
+
     review = Review(**fields)
     review_id = _reviews().create_review(review)     # committed here
 
     result = {"review_id": review_id, "synced": False, "warning": None}
     try:
-        sync_reviews()
+        _sync_reviews()
         result["synced"] = _warehouse().is_review_loaded(review_id)
         if not result["synced"]:
             result["warning"] = (
@@ -284,6 +292,7 @@ def onboard_employee(**fields):
     """Create an employee, then give them a first warehouse version.
     Returns (employee_id, employee_code, warning). Warning is None when synced.
     Raises DataAccessError if the OLTP save fails."""
+    require_permission("manage_employees")
     employee = Employee(employee_code="PENDING", **fields)
     employee_id, code = _employees().create_employee(employee)   # committed
     employee_search.clear()
@@ -300,6 +309,7 @@ def onboard_employee(**fields):
 
 def register_project(**fields):
     """Create a project. Returns (project_id, project_code)."""
+    require_permission("manage_projects")
     project = Project(project_code="PENDING", **fields)
     result = _projects().create_project(project)
     project_search.clear()
@@ -310,6 +320,7 @@ def register_project(**fields):
 # ---------------------------------------------------------------
 def sync_employees(effective_date=None):
     """Push new hires and job changes to Dim_Employee, then drop cached data."""
+    require_permission("sync_warehouse")
     _warehouse().refresh_employees(effective_date or date.today())
     st.cache_data.clear()
 
@@ -343,6 +354,7 @@ def apply_job_change(employee_id, employee_code, changes, effective_date):
     """Save in OLTP (with change log), then version the employee in the warehouse.
     OLTP failure raises DataAccessError. Warehouse failure does NOT raise:
     the change is saved and the result carries a warning."""
+    require_permission("manage_employees")
     if any(key != "manager_id" for key in changes):
         floor = change_floor(employee_id, employee_code)
         if effective_date < floor:

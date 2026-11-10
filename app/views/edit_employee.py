@@ -3,7 +3,10 @@ from datetime import date
 import streamlit as st
 
 from app import data
+from app.iam import require_permission
 from src.database.exceptions import DataAccessError
+
+require_permission("manage_employees")
 
 st.title("Edit employee")
 st.caption("Department, role, level and pay changes are versioned in the "
