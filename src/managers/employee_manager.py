@@ -1,11 +1,15 @@
 
 from mysql.connector import Error
+import uuid
 
-from src.database.db_manager import DatabaseConnection
+from src.database.base_manager import BaseManager
+from src.database.exceptions import ValidationError
 from src.entities.employee import Employee
 
 
-class EmployeeManager(DatabaseConnection):
+class EmployeeManager(BaseManager):
+
+    database_kind = "oltp"
 
     # Fields that are allowed to be updated
     ALLOWED_UPDATE_FIELDS = {
@@ -33,13 +37,6 @@ class EmployeeManager(DatabaseConnection):
         "job_involvement",
         "total_working_years"
     }
-
-    def __init__(self):
-        # Initialize the parent DatabaseConnection class
-        super().__init__()
-
-        # Use the OLTP database for employee operations
-        self.database_name = "employee_oltp"
 
     # --------------------------------------------------
     # 1. ADD EMPLOYEE
@@ -409,3 +406,106 @@ class EmployeeManager(DatabaseConnection):
 
             if connection and connection.is_connected():
                 connection.close()
+        # --------------------------------------------------
+    # 7. CREATE EMPLOYEE (used by the UI)
+    # --------------------------------------------------
+    INSERT_FIELDS = (
+        "employee_code", "first_name", "last_name", "email", "gender", "age",
+        "hire_date", "termination_date", "department_id", "job_role",
+        "job_level", "monthly_income", "percent_salary_hike", "manager_id",
+        "attrition", "status", "overtime", "business_travel",
+        "distance_from_home", "job_satisfaction", "environment_satisfaction",
+        "work_life_balance", "job_involvement", "total_working_years",
+    )
+
+    def create_employee(self, employee):
+        """Insert employee and assign the next EMP-###### code.
+        Returns (employee_id, employee_code). All-or-nothing."""
+        try:
+            employee.validate()
+        except ValueError as err:
+            raise ValidationError(str(err)) from err
+
+        temp_code = "TMP-" + uuid.uuid4().hex[:12]
+        values = [
+            temp_code if field == "employee_code" else getattr(employee, field)
+            for field in self.INSERT_FIELDS
+        ]
+        sql = (
+            f"INSERT INTO Employees ({', '.join(self.INSERT_FIELDS)}) "
+            f"VALUES ({', '.join(['%s'] * len(self.INSERT_FIELDS))})"
+        )
+
+        with self.transaction() as cursor:
+            cursor.execute(sql, values)
+            employee_id = cursor.lastrowid
+            code = f"EMP-{employee_id:06d}"
+            cursor.execute(
+                "UPDATE Employees SET employee_code = %s WHERE employee_id = %s",
+                (code, employee_id),
+            )
+
+        employee.employee_id, employee.employee_code = employee_id, code
+        return employee_id, code
+
+    # --------------------------------------------------
+    # 8. SEARCH (paged, never loads all 100K rows)
+    # --------------------------------------------------
+    def search_employees(self, term="", department_id=None,
+                         active_only=True, limit=50, offset=0):
+        conditions, params = [], []
+        term = (term or "").strip()
+
+        if term:
+            conditions.append(
+                "(e.employee_code LIKE %s OR e.email LIKE %s "
+                "OR CONCAT(e.first_name, ' ', e.last_name) LIKE %s)"
+            )
+            params += [f"{term}%", f"{term}%", f"%{term}%"]
+        if department_id is not None:
+            conditions.append("e.department_id = %s")
+            params.append(department_id)
+        if active_only:
+            conditions.append("e.termination_date IS NULL")
+
+        where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+        sql = f"""
+            SELECT e.employee_id, e.employee_code,
+                   CONCAT(e.first_name, ' ', e.last_name) AS full_name,
+                   e.email, d.department_name, e.job_role, e.job_level,
+                   e.monthly_income, e.hire_date, e.status
+            FROM Employees e
+            JOIN Departments d ON d.department_id = e.department_id
+            {where}
+            ORDER BY e.employee_id DESC
+            LIMIT %s OFFSET %s
+        """
+        return self.fetch_all(sql, tuple(params) + (int(limit), int(offset)))
+
+    # --------------------------------------------------
+    # 9. LOOKUPS FOR FORM DROPDOWNS
+    # --------------------------------------------------
+    def list_departments(self):
+        return self.fetch_all(
+            "SELECT department_id, department_name FROM Departments "
+            "ORDER BY department_name"
+        )
+
+    def list_job_roles(self, department_id):
+        rows = self.fetch_all(
+            "SELECT DISTINCT job_role FROM Employees "
+            "WHERE department_id = %s ORDER BY job_role",
+            (department_id,),
+        )
+        return [row["job_role"] for row in rows]
+
+    def list_managers(self, department_id, limit=200):
+        """Active level 4+ staff in the department."""
+        return self.fetch_all(
+            "SELECT employee_id, "
+            "CONCAT(first_name, ' ', last_name, ' (', employee_code, ')') AS label "
+            "FROM Employees "
+            "WHERE department_id = %s AND job_level >= 4 AND termination_date IS NULL "
+            "ORDER BY job_level DESC, last_name, first_name LIMIT %s",
+            (department_id, int(limit)),
+        )
