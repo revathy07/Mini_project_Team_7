@@ -19,7 +19,8 @@ pages = [
     st.Page("views/bottlenecks.py", title="Bottlenecks", icon="🚧"),
     st.Page("views/employees.py", title="Employees", icon="👥"),
     st.Page("views/projects.py", title="Projects", icon="📁"),
-        st.Page("views/reviews.py", title="Reviews", icon="📝"),
+    st.Page("views/reviews.py", title="Reviews", icon="📝"),
+    st.Page("views/edit_employee.py", title="Edit employee", icon="✏️"),
 ]
 
 navigation = st.navigation(pages)

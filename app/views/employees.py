@@ -66,7 +66,7 @@ with tab_onboard:
 
     if submitted:
         try:
-            employee_id, code = data.onboard_employee(
+            employee_id, code, warning = data.onboard_employee(
                 first_name=first_name.strip(),
                 last_name=last_name.strip(),
                 email=email.strip().lower(),
@@ -87,6 +87,8 @@ with tab_onboard:
             st.error(str(err))
         else:
             st.success(f"Created {first_name} {last_name}. Code {code} (ID {employee_id}).")
+            if warning:
+                st.warning(warning)
 
 # ---------------------------------------------------------------
 # Find
