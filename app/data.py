@@ -1,5 +1,9 @@
 """UI-facing data access: cached DataFrames built from AnalyticsManager.
 No SQL lives here or in the pages."""
+from datetime import date, timedelta
+
+from src.database.exceptions import ValidationError
+
 import pandas as pd
 import streamlit as st
 
@@ -251,7 +255,8 @@ def employee_review_history(employee_id):
 
 
 def sync_reviews():
-    """Push new reviews to the warehouse, then drop cached dashboard data."""
+    """New hires first (so their reviews can load), then reviews."""
+    _warehouse().refresh_employees(date.today())
     _warehouse().refresh_reviews()
     st.cache_data.clear()
 
@@ -276,13 +281,21 @@ def submit_review(**fields):
     return result
 
 def onboard_employee(**fields):
-    """Create an employee. Returns (employee_id, employee_code).
-    Raises DataAccessError (ValidationError, DuplicateRecordError, ...)."""
+    """Create an employee, then give them a first warehouse version.
+    Returns (employee_id, employee_code, warning). Warning is None when synced.
+    Raises DataAccessError if the OLTP save fails."""
     employee = Employee(employee_code="PENDING", **fields)
-    result = _employees().create_employee(employee)
+    employee_id, code = _employees().create_employee(employee)   # committed
     employee_search.clear()
     managers.clear()
-    return result
+
+    warning = None
+    try:
+        sync_employees(date.today())
+    except DataAccessError as err:
+        warning = (f"Saved, but the warehouse sync failed: {err}. "
+                   "Dashboards will not include this employee until it succeeds.")
+    return employee_id, code, warning
 
 
 def register_project(**fields):
@@ -290,4 +303,64 @@ def register_project(**fields):
     project = Project(project_code="PENDING", **fields)
     result = _projects().create_project(project)
     project_search.clear()
+    return result
+
+# ---------------------------------------------------------------
+# Edit employee: SCD2 hook
+# ---------------------------------------------------------------
+def sync_employees(effective_date=None):
+    """Push new hires and job changes to Dim_Employee, then drop cached data."""
+    _warehouse().refresh_employees(effective_date or date.today())
+    st.cache_data.clear()
+
+
+def employee_for_edit(employee_id):
+    return _employees().get_employee_for_edit(employee_id)
+
+
+def version_history(employee_code):
+    rows = _warehouse().version_history(employee_code)
+    cols = ["department_name", "job_role", "job_level", "monthly_income",
+            "start_date", "end_date", "is_current"]
+    return _frame(rows, cols, numeric=["job_level", "monthly_income"])
+
+
+def change_floor(employee_id, employee_code):
+    """Earliest effective date allowed for a change. If the employee has no
+    warehouse version yet, load it FIRST, so the pre-change state is kept as
+    history instead of being replaced by the new values."""
+    floor = _employees().get_change_floor(employee_id)
+    dw_start = _warehouse().current_version_start(employee_code)
+    if dw_start is None:
+        sync_employees(date.today())                  # may raise WarehouseSyncError
+        dw_start = _warehouse().current_version_start(employee_code)
+    if dw_start is not None and dw_start + timedelta(days=1) > floor:
+        floor = dw_start + timedelta(days=1)          # a version needs >= 1 day
+    return floor
+
+
+def apply_job_change(employee_id, employee_code, changes, effective_date):
+    """Save in OLTP (with change log), then version the employee in the warehouse.
+    OLTP failure raises DataAccessError. Warehouse failure does NOT raise:
+    the change is saved and the result carries a warning."""
+    if any(key != "manager_id" for key in changes):
+        floor = change_floor(employee_id, employee_code)
+        if effective_date < floor:
+            raise ValidationError(
+                f"Effective date cannot be before {floor} (the current warehouse "
+                "version, a review, or a project assignment starts then).")
+
+    outcome = _employees().update_job_details(employee_id, changes, effective_date)
+    employee_search.clear()
+
+    result = {**outcome, "synced": True, "warning": None}
+    if outcome["diffs"]:
+        try:
+            sync_employees(effective_date)
+        except DataAccessError as err:
+            result["synced"] = False
+            result["warning"] = (
+                f"Saved, but the warehouse sync failed: {err}. Use "
+                "'Retry warehouse sync' on this page. Do it today, because the "
+                "retry dates the change today.")
     return result
