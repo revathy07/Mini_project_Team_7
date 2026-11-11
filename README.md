@@ -13,9 +13,7 @@ An end-to-end HR analytics platform: a synthetic 100,000-employee dataset, a nor
 
 ## Architecture
 
-```
 ![Architecture](docs/images/architecture.png)
-```
 
 | Layer | Database | Role |
 |---|---|---|
