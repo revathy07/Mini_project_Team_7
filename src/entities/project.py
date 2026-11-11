@@ -1,4 +1,12 @@
 
+from src.entities.validation import (
+    parse_date,
+    validate_integer,
+    validate_number,
+    validate_text,
+)
+
+
 class Project:
 
     # Constructor: initializes project details
@@ -56,26 +64,37 @@ class Project:
 
     # Validates project information
     def validate(self):
+        validate_text(self.project_code, "Project code", 20)
+        validate_text(self.project_name, "Project name", 150)
+        start = parse_date(self.start_date, "Project start date")
+        planned_end = parse_date(
+            self.planned_end_date, "Planned end date", optional=True
+        )
+        end = parse_date(self.end_date, "Project end date", optional=True)
+        validate_integer(self.project_id, "Project ID", minimum=1, optional=True)
+        validate_integer(
+            self.department_id, "Department ID", minimum=1, optional=True
+        )
+        validate_integer(
+            self.project_manager_id, "Project manager ID",
+            minimum=1, optional=True,
+        )
+        validate_number(
+            self.budget, "Project budget", minimum=0, maximum=9999999999.99,
+            optional=True, decimal_places=2,
+        )
+        validate_text(self.status, "Project status", 20)
+        if self.status not in {"Active", "On Hold", "Completed", "Cancelled"}:
+            raise ValueError("Project status must be Active, On Hold, Completed, or Cancelled")
+        validate_text(self.priority, "Project priority", 10, optional=True)
+        if self.priority and self.priority.strip() not in {
+            "Low", "Medium", "High", "Critical"
+        }:
+            raise ValueError("Project priority must be Low, Medium, High, or Critical")
 
-        if not self.project_code:
-            raise ValueError("Project code is required")
-
-        if not self.project_name:
-            raise ValueError("Project name is required")
-
-        if not self.start_date:
-            raise ValueError("Project start date is required")
-
-        if self.budget is not None and self.budget < 0:
-            raise ValueError("Project budget cannot be negative")
-
-        if (
-            self.planned_end_date is not None
-            and self.planned_end_date < self.start_date
-        ):
+        if planned_end is not None and planned_end < start:
             raise ValueError("Planned end date cannot be before start date")
-
-        if self.end_date is not None and self.end_date < self.start_date:
+        if end is not None and end < start:
             raise ValueError("End date cannot be before start date")
 
         return True

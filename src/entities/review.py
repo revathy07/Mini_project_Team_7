@@ -1,4 +1,15 @@
 
+from datetime import date
+
+from src.entities.validation import (
+    parse_date,
+    validate_boolean,
+    validate_integer,
+    validate_number,
+    validate_text,
+)
+
+
 class Review:
 
     # Constructor: initializes performance review details
@@ -46,40 +57,42 @@ class Review:
     # Validates review information
     def validate(self):
 
-        if self.employee_id is None:
-            raise ValueError("Employee ID is required")
-
-        if not self.review_date:
-            raise ValueError("Review date is required")
-
-        if not self.review_period:
-            raise ValueError("Review period is required")
-
+        validate_integer(self.employee_id, "Employee ID", minimum=1)
+        validate_integer(
+            self.reviewer_id, "Reviewer ID", minimum=1, optional=True
+        )
+        if self.reviewer_id == self.employee_id:
+            raise ValueError("An employee cannot review themselves")
+        validate_integer(self.review_id, "Review ID", minimum=1, optional=True)
+        review_date = parse_date(self.review_date, "Review date")
+        if review_date > date.today():
+            raise ValueError("Review date cannot be in the future")
+        if review_date.year < 2010:
+            raise ValueError("Review date must be 2010 or later")
+        validate_text(self.review_period, "Review period", 20)
+        validate_number(
+            self.performance_score, "Performance score",
+            minimum=1, maximum=5, optional=True, decimal_places=2,
+        )
+        validate_integer(
+            self.performance_rating, "Performance rating",
+            minimum=1, maximum=5, optional=True,
+        )
+        validate_number(
+            self.goal_achievement_pct, "Goal achievement percentage",
+            minimum=0, maximum=130, optional=True, decimal_places=1,
+        )
+        validate_number(
+            self.peer_feedback_score, "Peer feedback score",
+            minimum=1, maximum=5, optional=True, decimal_places=2,
+        )
+        validate_boolean(self.promotion_recommended, "Promotion recommendation")
+        validate_text(self.comments, "Review comments", 65535, optional=True)
         if (
-            self.performance_score is not None
-            and not 1 <= self.performance_score <= 5
+            self.comments is not None
+            and len(self.comments.encode("utf-8")) > 65535
         ):
-            raise ValueError("Performance score must be between 1 and 5")
-
-        if (
-            self.performance_rating is not None
-            and not 1 <= self.performance_rating <= 5
-        ):
-            raise ValueError("Performance rating must be between 1 and 5")
-
-        if (
-            self.goal_achievement_pct is not None
-            and not 0 <= self.goal_achievement_pct <= 130
-        ):
-            raise ValueError(
-                "Goal achievement percentage must be between 0 and 130"
-            )
-
-        if (
-            self.peer_feedback_score is not None
-            and not 1 <= self.peer_feedback_score <= 5
-        ):
-            raise ValueError("Peer feedback score must be between 1 and 5")
+            raise ValueError("Review comments exceed the database text limit")
 
         return True
 

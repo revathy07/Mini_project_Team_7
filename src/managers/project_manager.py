@@ -1,6 +1,5 @@
 
 from mysql.connector import Error
-from datetime import datetime
 
 import uuid
 
@@ -8,6 +7,12 @@ from src.database.base_manager import BaseManager
 from src.database.exceptions import ValidationError
 
 from src.entities.project import Project
+from src.entities.validation import (
+    parse_date,
+    validate_integer,
+    validate_number,
+    validate_text,
+)
 
 
 class ProjectManager(BaseManager):
@@ -176,6 +181,9 @@ class ProjectManager(BaseManager):
         cursor = None
 
         try:
+            validate_integer(project_id, "Project ID", minimum=1)
+            if not isinstance(updated_fields, dict):
+                raise ValueError("Project updates must be provided as a mapping")
             if not updated_fields:
                 raise ValueError("No project details provided for update")
 
@@ -186,7 +194,16 @@ class ProjectManager(BaseManager):
                     )
 
             connection = self.get_connection(self.database_name)
-            cursor = connection.cursor()
+            cursor = connection.cursor(dictionary=True)
+
+            cursor.execute(
+                "SELECT * FROM Projects WHERE project_id = %s",
+                (project_id,),
+            )
+            current = cursor.fetchone()
+            if current is None:
+                raise ValueError("Project not found")
+            Project(**{**current, **updated_fields}).validate()
 
             set_clause = ", ".join(
                 [f"{field} = %s" for field in updated_fields]
@@ -296,20 +313,32 @@ class ProjectManager(BaseManager):
         cursor = None
 
         try:
-            if employee_id is None:
-                raise ValueError("Employee ID is required")
-
-            if project_id is None:
-                raise ValueError("Project ID is required")
-
-            if not start_date:
-                raise ValueError("Assignment start date is required")
-
-            if allocation_percentage is not None and allocation_percentage < 0:
-                raise ValueError("Allocation percentage cannot be negative")
-
-            if budget is not None and budget < 0:
-                raise ValueError("Assignment budget cannot be negative")
+            validate_integer(employee_id, "Employee ID", minimum=1)
+            validate_integer(project_id, "Project ID", minimum=1)
+            start = parse_date(start_date, "Assignment start date")
+            planned_end = parse_date(
+                planned_end_date, "Assignment planned end date", optional=True
+            )
+            if planned_end is not None and planned_end < start:
+                raise ValueError(
+                    "Assignment planned end date cannot be before start date"
+                )
+            validate_text(role_in_project, "Project role", 50, optional=True)
+            validate_integer(
+                allocation_percentage, "Allocation percentage",
+                minimum=0, maximum=100, optional=True,
+            )
+            validate_number(
+                budget, "Assignment budget", minimum=0,
+                maximum=9999999999.99, optional=True, decimal_places=2,
+            )
+            validate_text(priority, "Assignment priority", 10, optional=True)
+            if priority and priority.strip() not in {
+                "Low", "Medium", "High", "Critical"
+            }:
+                raise ValueError(
+                    "Assignment priority must be Low, Medium, High, or Critical"
+                )
 
             connection = self.get_connection(self.database_name)
             cursor = connection.cursor()
@@ -454,11 +483,8 @@ class ProjectManager(BaseManager):
         cursor = None
 
         try:
-            # Convert string date into Python date object
-            if isinstance(end_date, str):
-                end_date = datetime.strptime(
-                    end_date, "%Y-%m-%d"
-                ).date()
+            validate_integer(assignment_id, "Assignment ID", minimum=1)
+            end_date = parse_date(end_date, "Assignment end date")
 
             # Connect to the OLTP database
             connection = self.get_connection(self.database_name)
@@ -506,25 +532,25 @@ class ProjectManager(BaseManager):
             if connection:
                 connection.rollback()
             print("Validation error:", e)
-            return False
+            raise
 
         except Error as e:
             if connection:
                 connection.rollback()
             print("Database error while releasing employee:", e)
-            return False
+            raise
 
         except Exception as e:
             if connection:
                 connection.rollback()
             print("Unexpected error while releasing employee:", e)
-            return False
+            raise
 
         finally:
             if cursor:
                 cursor.close()
             if connection and connection.is_connected():
-                connection.cloe()
+                connection.close()
         # --------------------------------------------------
     # CREATE PROJECT (used by the UI)
     # --------------------------------------------------

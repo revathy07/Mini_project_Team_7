@@ -1,5 +1,12 @@
-from datetime import date, datetime
-from decimal import Decimal
+import re
+
+from src.entities.validation import (
+    parse_date,
+    validate_boolean,
+    validate_integer,
+    validate_number,
+    validate_text,
+)
 
 class Employee:
 
@@ -92,57 +99,51 @@ class Employee:
     @staticmethod
     def _as_date(value):
         """Accept date, datetime or 'YYYY-MM-DD' text. Return a date, or None."""
-        if isinstance(value, datetime):
-            return value.date()
-        if isinstance(value, date):
-            return value
-        if isinstance(value, str):
-            try:
-                return date.fromisoformat(value)
-            except ValueError:
-                return None
-        return None
+        try:
+            return parse_date(value, "Date")
+        except ValueError:
+            return None
 
     # Validates employee information
     def validate(self):
-
-        if not self.employee_code:
-            raise ValueError("Employee code is required")
-
-        if not self.first_name or not self.last_name:
-            raise ValueError("Employee name is required")
-
-        if (not self.email or "@" not in self.email
-                or "." not in self.email.split("@")[-1]):
+        validate_text(self.employee_code, "Employee code", 20)
+        validate_text(self.first_name, "First name", 50)
+        validate_text(self.last_name, "Last name", 50)
+        if (not isinstance(self.email, str)
+                or not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", self.email)
+                or len(self.email) > 100):
             raise ValueError("Enter a valid email address")
 
-        income = self.monthly_income
-        if isinstance(income, bool) or not isinstance(income, (int, float, Decimal)):
-            raise ValueError("Monthly income must be numeric")
-        if income <= 0:
-            raise ValueError("Monthly income must be greater than zero")
-
-        if not self.job_role:
-            raise ValueError("Job role is required")
-
-        hire = self._as_date(self.hire_date)
-        if hire is None:
-            raise ValueError("Hire date is required and must be a valid date")
-
-        if self.termination_date is not None:
-            term = self._as_date(self.termination_date)
-            if term is None or term < hire:
-                raise ValueError("Termination date cannot be before hire date")
-
-        if self.department_id is None:
-            raise ValueError("Department ID is required")
-
-        if self.age is not None and not 18 <= self.age <= 70:
-            raise ValueError("Age must be between 18 and 70")
-
-        if self.job_level is not None and not 1 <= self.job_level <= 5:
-            raise ValueError("Job level must be between 1 and 5")
-
+        validate_number(
+            self.monthly_income, "Monthly income", minimum=0.01,
+            maximum=9999999999.99, decimal_places=2,
+        )
+        validate_text(self.job_role, "Job role", 50)
+        hire = parse_date(self.hire_date, "Hire date")
+        term = parse_date(
+            self.termination_date, "Termination date", optional=True
+        )
+        if term is not None and term < hire:
+            raise ValueError("Termination date cannot be before hire date")
+        validate_integer(self.department_id, "Department ID", minimum=1)
+        validate_integer(self.employee_id, "Employee ID", minimum=1, optional=True)
+        validate_integer(self.manager_id, "Manager ID", minimum=1, optional=True)
+        validate_integer(self.age, "Age", minimum=18, maximum=70, optional=True)
+        validate_integer(
+            self.job_level, "Job level", minimum=1, maximum=5, optional=True
+        )
+        validate_integer(
+            self.percent_salary_hike, "Percent salary hike",
+            minimum=0, maximum=100, optional=True,
+        )
+        validate_integer(
+            self.distance_from_home, "Distance from home",
+            minimum=0, maximum=100, optional=True,
+        )
+        validate_integer(
+            self.total_working_years, "Total working years",
+            minimum=0, maximum=100, optional=True,
+        )
         if (self.total_working_years is not None and self.age is not None
                 and self.total_working_years > self.age - 18):
             raise ValueError("Total working years cannot exceed age minus 18")
@@ -153,8 +154,30 @@ class Employee:
             ("Work-life balance", self.work_life_balance),
             ("Job involvement", self.job_involvement),
         ):
-            if value is not None and not 1 <= value <= 4:
-                raise ValueError(f"{label} must be between 1 and 4")
+            validate_integer(value, label, minimum=1, maximum=4, optional=True)
+
+        validate_text(self.gender, "Gender", 10, optional=True)
+        if self.gender and self.gender.strip() not in {
+            "Male", "Female"
+        }:
+            raise ValueError("Gender must be Male or Female")
+        validate_text(self.status, "Employment status", 20)
+        if self.status not in {"Active", "Terminated"}:
+            raise ValueError("Employment status must be Active or Terminated")
+        validate_text(self.business_travel, "Business travel", 20, optional=True)
+        if self.business_travel and self.business_travel.strip() not in {
+            "Non-Travel", "Travel_Rarely", "Travel_Frequently"
+        }:
+            raise ValueError(
+                "Business travel must be Non-Travel, Travel_Rarely, or Travel_Frequently"
+            )
+        if (
+            self.employee_id is not None
+            and self.manager_id == self.employee_id
+        ):
+            raise ValueError("An employee cannot be their own manager")
+        validate_boolean(self.attrition, "Attrition")
+        validate_boolean(self.overtime, "Overtime", optional=True)
 
         return True
 

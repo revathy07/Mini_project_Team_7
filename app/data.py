@@ -9,6 +9,7 @@ import streamlit as st
 
 from src.database.exceptions import DataAccessError
 from src.entities.review import Review
+from src.entities.validation import parse_date
 from src.managers.review_manager import ReviewManager
 from src.managers.warehouse_sync import WarehouseSync
 
@@ -343,6 +344,11 @@ def apply_job_change(employee_id, employee_code, changes, effective_date):
     """Save in OLTP (with change log), then version the employee in the warehouse.
     OLTP failure raises DataAccessError. Warehouse failure does NOT raise:
     the change is saved and the result carries a warning."""
+    try:
+        effective_date = parse_date(effective_date, "Effective date")
+    except ValueError as err:
+        raise ValidationError(str(err)) from err
+
     if any(key != "manager_id" for key in changes):
         floor = change_floor(employee_id, employee_code)
         if effective_date < floor:

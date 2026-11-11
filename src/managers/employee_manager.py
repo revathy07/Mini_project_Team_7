@@ -10,6 +10,12 @@ from decimal import Decimal, InvalidOperation
 from src.database.exceptions import NotFoundError, ValidationError
 
 from src.entities.employee import Employee
+from src.entities.validation import (
+    parse_date,
+    validate_integer,
+    validate_number,
+    validate_text,
+)
 
 
 def classify_change(old, new):
@@ -312,6 +318,9 @@ class EmployeeManager(BaseManager):
         cursor = None
 
         try:
+            validate_integer(employee_id, "Employee ID", minimum=1)
+            if not isinstance(updated_fields, dict):
+                raise ValueError("Employee updates must be provided as a mapping")
             if not updated_fields:
                 raise ValueError("No employee details provided for update")
 
@@ -325,7 +334,16 @@ class EmployeeManager(BaseManager):
                     )
 
             connection = self.get_connection(self.database_name)
-            cursor = connection.cursor()
+            cursor = connection.cursor(dictionary=True)
+
+            cursor.execute(
+                "SELECT * FROM Employees WHERE employee_id = %s",
+                (employee_id,),
+            )
+            current = cursor.fetchone()
+            if current is None:
+                raise ValueError("Employee not found")
+            Employee(**{**current, **updated_fields}).validate()
 
             # Build the SET portion of the SQL query
             set_clause = ", ".join(
@@ -597,10 +615,15 @@ class EmployeeManager(BaseManager):
         transaction. Returns {"change_type", "diffs", "manager_changed"}.
         The warehouse is NOT touched here (see WarehouseSync)."""
         allowed = set(self.TRACKED_FIELDS) | {"manager_id"}
+        validate_integer(employee_id, "Employee ID", minimum=1)
+        if not isinstance(changes, dict):
+            raise ValidationError("Employee changes must be provided as a mapping.")
         if not changes or set(changes) - allowed:
             raise ValidationError("Nothing to change, or an unsupported field was sent.")
-        if not isinstance(effective_date, date):
-            raise ValidationError("Effective date must be a valid date.")
+        try:
+            effective_date = parse_date(effective_date, "Effective date")
+        except ValueError as err:
+            raise ValidationError(str(err)) from err
         if effective_date > date.today():
             raise ValidationError("Effective date cannot be in the future.")
 
@@ -628,12 +651,23 @@ class EmployeeManager(BaseManager):
             new = {field: old[field] for field in self.TRACKED_FIELDS}
             try:
                 if "department_id" in changes:
-                    new["department_id"] = int(changes["department_id"])
+                    validate_integer(
+                        changes["department_id"], "Department ID", minimum=1
+                    )
+                    new["department_id"] = changes["department_id"]
                 if "job_role" in changes:
-                    new["job_role"] = str(changes["job_role"]).strip()
+                    validate_text(changes["job_role"], "Job role", 50)
+                    new["job_role"] = changes["job_role"].strip()
                 if "job_level" in changes:
-                    new["job_level"] = int(changes["job_level"])
+                    validate_integer(
+                        changes["job_level"], "Job level", minimum=1, maximum=5
+                    )
+                    new["job_level"] = changes["job_level"]
                 if "monthly_income" in changes:
+                    validate_number(
+                        changes["monthly_income"], "Monthly income",
+                        minimum=0.01, maximum=9999999999.99,
+                    )
                     new["monthly_income"] = Decimal(
                         str(changes["monthly_income"])).quantize(Decimal("0.01"))
             except (TypeError, ValueError, InvalidOperation):

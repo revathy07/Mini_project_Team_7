@@ -7,11 +7,38 @@ from src.database.base_manager import BaseManager
 from src.database.exceptions import NotFoundError, ValidationError
 
 from src.entities.review import Review
+from src.entities.validation import parse_date, validate_integer
 
 
 class ReviewManager(BaseManager):
 
     database_kind = "oltp"
+
+    @staticmethod
+    def _validate_employee_tenure(cursor, review):
+        cursor.execute(
+            "SELECT hire_date, termination_date FROM Employees "
+            "WHERE employee_id = %s",
+            (review.employee_id,),
+        )
+        employee = cursor.fetchone()
+        if employee is None:
+            raise NotFoundError("Employee not found.")
+
+        if isinstance(employee, dict):
+            hire = employee["hire_date"]
+            termination = employee["termination_date"]
+        else:
+            hire, termination = employee
+        review_date = parse_date(review.review_date, "Review date")
+        if review_date < hire:
+            raise ValidationError(
+                f"Review date is before the hire date ({hire})."
+            )
+        if termination is not None and review_date > termination:
+            raise ValidationError(
+                f"Review date is after the employee left ({termination})."
+            )
 
     # --------------------------------------------------
     # 1. ADD PERFORMANCE REVIEW
@@ -24,9 +51,11 @@ class ReviewManager(BaseManager):
         try:
             # Validate review details
             review.validate()
+            review.review_date = parse_date(review.review_date, "Review date")
 
             connection = self.get_connection(self.database_name)
             cursor = connection.cursor()
+            self._validate_employee_tenure(cursor, review)
 
             query = """
                 INSERT INTO Performance_Reviews (
@@ -236,6 +265,9 @@ class ReviewManager(BaseManager):
         }
 
         try:
+            validate_integer(review_id, "Review ID", minimum=1)
+            if not isinstance(updated_fields, dict):
+                raise ValueError("Review updates must be provided as a mapping")
             if not updated_fields:
                 raise ValueError("No review details provided for update")
 
@@ -249,7 +281,18 @@ class ReviewManager(BaseManager):
                     )
 
             connection = self.get_connection(self.database_name)
-            cursor = connection.cursor()
+            cursor = connection.cursor(dictionary=True)
+
+            cursor.execute(
+                "SELECT * FROM Performance_Reviews WHERE review_id = %s",
+                (review_id,),
+            )
+            current = cursor.fetchone()
+            if current is None:
+                raise ValueError("Performance review not found")
+            updated_review = Review(**{**current, **updated_fields})
+            updated_review.validate()
+            self._validate_employee_tenure(cursor, updated_review)
 
             set_clause = ", ".join(
                 [f"{field} = %s" for field in updated_fields]
@@ -379,31 +422,14 @@ class ReviewManager(BaseManager):
         except ValueError as err:
             raise ValidationError(str(err)) from err
 
-        if not isinstance(review.review_date, date):
-            raise ValidationError("Review date must be a valid date.")
+        try:
+            review.review_date = parse_date(review.review_date, "Review date")
+        except ValueError as err:
+            raise ValidationError(str(err)) from err
         if review.review_date > date.today():
             raise ValidationError("Review date cannot be in the future.")
-        if review.review_date.year < 2010:
-            raise ValidationError(
-                "Review date must be 2010 or later (warehouse calendar range).")
-        if review.reviewer_id is not None and review.reviewer_id == review.employee_id:
-            raise ValidationError("An employee cannot review themselves.")
-
         with self.transaction() as cursor:
-            cursor.execute(
-                "SELECT hire_date, termination_date FROM Employees "
-                "WHERE employee_id = %s", (review.employee_id,))
-            row = cursor.fetchone()
-            if row is None:
-                raise NotFoundError("Employee not found.")
-            hire, termination = row
-
-            if review.review_date < hire:
-                raise ValidationError(
-                    f"Review date is before the hire date ({hire}).")
-            if termination is not None and review.review_date > termination:
-                raise ValidationError(
-                    f"Review date is after the employee left ({termination}).")
+            self._validate_employee_tenure(cursor, review)
 
             cursor.execute(self.INSERT_SQL, (
                 review.employee_id, review.reviewer_id, review.review_date,

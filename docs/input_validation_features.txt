@@ -1,0 +1,136 @@
+INPUT VALIDATION FEATURES
+Employee Analytics and Data Warehouse Application
+Branch: feature/input-validation
+
+OVERVIEW
+
+This branch strengthens server-side input validation for employee, project,
+performance review, and project assignment data. Validation is implemented in
+the entity classes and data-access managers, so it applies to backend calls as
+well as the Streamlit forms. Invalid input raises a clear ValueError or
+ValidationError before the corresponding write is made.
+
+SHARED VALIDATION UTILITIES
+
+src/entities/validation.py provides reusable checks used by the entities and
+managers:
+
+- Required and optional text, including maximum character lengths.
+- Integer values, with optional minimum and maximum bounds. Boolean values are
+  not accepted as integers.
+- Numeric values, rejecting booleans, NaN, and infinity; optional range and
+  decimal-place limits can be applied.
+- Boolean values, accepting Python booleans and database-style 0 or 1.
+- Dates provided as Python date/datetime values or exact YYYY-MM-DD strings.
+  Invalid or non-ISO date strings are rejected.
+
+EMPLOYEE VALIDATION
+
+src/entities/employee.py checks:
+
+- Employee code, first name, and last name are required and fit their database
+  column lengths.
+- Email has a basic address format and does not exceed 100 characters.
+- Job role is required and limited to 50 characters.
+- Monthly income is numeric, finite, greater than zero, within the database
+  column range, and has no more than two decimal places.
+- Hire date is valid. Optional termination date must be valid and cannot be
+  before the hire date.
+- Department ID is required and positive. Optional employee and manager IDs
+  must be positive integers.
+- Optional age is an integer from 18 through 70.
+- Optional job level is an integer from 1 through 5.
+- Optional percent salary hike is an integer from 0 through 100.
+- Optional distance from home is an integer from 0 through 100.
+- Optional total working years is a nonnegative integer and cannot exceed age
+  minus 18 when age is provided.
+- Optional job satisfaction, environment satisfaction, work-life balance, and
+  job involvement values are integers from 1 through 4.
+- Optional gender, when provided, is Male or Female.
+- Employment status is Active or Terminated.
+- Optional business travel value, when provided, is Non-Travel, Travel_Rarely,
+  or Travel_Frequently.
+- Attrition and optional overtime values must be booleans or database-style
+  0/1 values.
+- An employee cannot be their own manager.
+
+PROJECT VALIDATION
+
+src/entities/project.py checks:
+
+- Project code and project name are required and fit their database column
+  lengths.
+- Start date is valid; optional planned end and actual end dates must also be
+  valid.
+- Planned end date and actual end date cannot be before the start date.
+- Optional project, department, and project manager IDs must be positive
+  integers.
+- Optional budget must be finite, nonnegative, within the database column
+  range, and have no more than two decimal places.
+- Status must be Active, On Hold, Completed, or Cancelled.
+- Optional priority, when provided, must be Low, Medium, High, or Critical.
+
+PERFORMANCE REVIEW VALIDATION
+
+src/entities/review.py checks:
+
+- Employee ID is required and positive. Optional reviewer and review IDs must
+  be positive integers.
+- Reviewer and employee cannot be the same person.
+- Review date must be valid, cannot be in the future, and must be in 2010 or
+  later.
+- Review period is required and limited to 20 characters.
+- Optional performance score and peer feedback score must be finite numbers
+  from 1 through 5, with no more than two decimal places.
+- Optional performance rating must be an integer from 1 through 5.
+- Optional goal achievement percentage must be from 0 through 130, with no
+  more than one decimal place.
+- Promotion recommendation must be a boolean or database-style 0/1 value.
+- Optional comments must fit the database TEXT storage limit.
+- The review date must fall on or after the employee hire date and on or before
+  the employee termination date, if the employee has left.
+
+PROJECT ASSIGNMENT AND EFFECTIVE-DATE VALIDATION
+
+src/managers/project_manager.py checks:
+
+- Employee and project IDs are positive integers.
+- Assignment start date and optional planned end date are valid dates.
+- Planned end date cannot be before the assignment start date.
+- Optional project role fits the column length.
+- Allocation percentage is an integer from 0 through 100.
+- Optional assignment budget is finite, nonnegative, within the database range,
+  and has no more than two decimal places.
+- Optional assignment priority is Low, Medium, High, or Critical.
+- Assignment release requires a positive assignment ID and valid end date, and
+  rejects an end date earlier than the assignment start date or an assignment
+  that is already completed.
+
+For SCD Type 2 job changes, the effective date is parsed and validated before
+the update. The existing business rules also prevent future effective dates
+and dates before the employee's allowed change floor.
+
+VALIDATION ON UPDATES
+
+The employee, project, and review update methods validate the full record after
+merging the proposed field changes with the current database record. This
+prevents partial updates from bypassing required-field, type, range, date, or
+cross-field rules. Update methods also reject empty updates and unsupported
+field names.
+
+The UI-facing review and employee change flows use the same validation-backed
+manager methods. Database uniqueness and foreign-key rules remain enforced by
+MySQL; validation does not replace those database constraints.
+
+TEST COVERAGE
+
+test/test_input_validation.py covers valid and invalid entity values, update
+validation, review tenure checks, assignment bounds, and invalid assignment
+dates. The validation and entity test command was:
+
+    python -m pytest test/test_input_validation.py test/test_employee.py test/test_project.py test/test_review.py -q
+
+Result at the time this document was prepared: 51 tests passed.
+
+The tests focus on the listed application fields and project rules. This is
+not a claim that every imaginable business or security rule is covered.
