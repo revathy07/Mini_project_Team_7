@@ -32,6 +32,9 @@ class StagingLoader:
             user=os.getenv("DB_USER", "root"),
             password=os.getenv("DB_PASSWORD"),
             database=os.getenv("DB_STAGING", "employee_staging"),
+            # Aiven SSL configuration
+            ssl_ca=os.getenv("DB_SSL_CA") or None,
+            ssl_verify_cert=bool(os.getenv("DB_SSL_CA")),
         )
 
     def load_table(self, csv_name: str, table: str) -> tuple[int, int]:

@@ -62,8 +62,14 @@ def main() -> bool:
         user=os.getenv("DB_USER", "root"),
         password=os.getenv("DB_PASSWORD"),
         database=os.getenv("DB_OLTP", OLTP),
-    )
+
+        # Aiven SSL configuration
+        ssl_ca=os.getenv("DB_SSL_CA") or None,
+        ssl_verify_cert=bool(os.getenv("DB_SSL_CA")),
+)
+
     cur = conn.cursor()
+
 
     print("Running sp_load_oltp_from_staging() ...")
     t0 = time.time()
