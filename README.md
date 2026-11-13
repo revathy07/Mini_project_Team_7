@@ -2,7 +2,7 @@
 
 An end-to-end HR analytics platform: a synthetic 100,000-employee dataset, a normalized operational database (OLTP), a star-schema data warehouse (OLAP) with **SCD Type 2** history, and a **Streamlit** web app for data entry and dashboards.
 
-**Live app:** `<Streamlit Community Cloud URL>`  ·  **Documentation:** `<Google Doc link>`
+**Live app:** `https://projectteam7employeeanalyticsanddatawarehousing.streamlit.app/` 
 
 ## What it does
 
@@ -13,7 +13,9 @@ An end-to-end HR analytics platform: a synthetic 100,000-employee dataset, a nor
 
 ## Architecture
 
+```
 ![Architecture](docs/images/architecture.png)
+```
 
 | Layer | Database | Role |
 |---|---|---|
